@@ -4,6 +4,7 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/jonas747/dcmd"
+	"github.com/jonas747/discordgo"
 	"github.com/jonas747/dutil"
 	"github.com/jonas747/yagpdb/bot"
 	"github.com/jonas747/yagpdb/bot/eventsystem"
@@ -118,46 +119,50 @@ func GenerateHelp(target string) string {
 // 	return out
 // }
 
-var cmdHelp = &CustomCommand{
-	Cooldown: 10,
-	Category: CategoryGeneral,
-	Command: &commandsystem.Command{
-		Name:        "Help",
-		Description: "Shows help abut all or one specific command",
-		RunInDm:     true,
-		Arguments: []*commandsystem.ArgDef{
-			&commandsystem.ArgDef{Name: "command", Type: commandsystem.ArgumentString},
-		},
-
-		Run: cmdFuncHelp,
+var cmdHelp = &YAGCommand{
+	Name:        "Help",
+	Description: "Shows help abut all or one specific command",
+	CmdCategory: CategoryGeneral,
+	RunInDM:     true,
+	Arguments: []*dcmd.ArgDef{
+		&dcmd.ArgDef{Name: "command", Type: dcmd.String},
 	},
+
+	RunFunc:  cmdFuncHelp,
+	Cooldown: 10,
 }
 
-func cmdFuncHelp(data *commandsystem.ExecData) (interface{}, error) {
+func cmdFuncHelp(data *dcmd.Data) (interface{}, error) {
 	target := ""
 	if data.Args[0] != nil {
 		target = data.Args[0].Str()
 	}
 
+	var resp []*discordgo.MessageEmbed
+	if target != "" {
+
+	}
+	dcmd.GenerateHelp(d, container, formatter)
+
 	// Fetch the prefix if ther command was not run in a dm
-	footer := ""
-	if data.Source != commandsystem.SourceDM && target == "" {
-		prefix, err := GetCommandPrefix(data.Context().Value(CtxKeyRedisClient).(*redis.Client), data.Guild.ID())
-		if err != nil {
-			return "Error communicating with redis", err
-		}
+	// footer := ""
+	// if data.Source != dcmd.DMSource && target == "" {
+	// 	prefix, err := GetCommandPrefix(data.Context().Value(CtxKeyRedisClient).(*redis.Client), data.GS.ID())
+	// 	if err != nil {
+	// 		return "Error communicating with redis", err
+	// 	}
 
-		footer = "**No command prefix set, you can still use commands through mentioning the bot\n**"
-		if prefix != "" {
-			footer = fmt.Sprintf("**Command prefix: %q**\n", prefix)
-		}
-	}
+	// 	footer = "**No command prefix set, you can still use commands through mentioning the bot\n**"
+	// 	if prefix != "" {
+	// 		footer = fmt.Sprintf("**Command prefix: %q**\n", prefix)
+	// 	}
+	// }
 
-	if target == "" {
-		footer += "**Support server:** https://discord.gg/0vYlUK2XBKldPSMY\n**Control Panel:** https://yagpdb.xyz/manage\n"
-	}
+	// if target == "" {
+	// 	footer += "**Support server:** https://discord.gg/0vYlUK2XBKldPSMY\n**Control Panel:** https://yagpdb.xyz/manage\n"
+	// }
 
-	channelId := data.Message.ChannelID
+	channelId := data.Msg.ChannelID
 
 	help := GenerateHelp(target)
 	if target == "" && data.Source != commandsystem.SourceDM {

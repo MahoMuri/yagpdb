@@ -79,9 +79,12 @@ type YAGCommand struct {
 	HideFromCommandsPage bool   // Set to  hide this command from the commands page
 	Key                  string // GuildId is appended to the key, e.g if key is "test:", it will check for "test:<guildid>"
 	CustomEnabled        bool   // Set to true to handle the enable check itself
-	Default              bool   // The default state of this command
-	Cooldown             int    // Cooldown in seconds before user can use it again
-	CommandCategory      *dcmd.Category
+	Default              bool   // The default enabled state of this command
+
+	Cooldown    int // Cooldown in seconds before user can use it again
+	CmdCategory *dcmd.Category
+
+	RunInDM bool // Set to enable this commmand in DM's
 
 	// Run is ran the the command has sucessfully been parsed
 	// It returns a reply and an error
@@ -107,6 +110,9 @@ func (yc *YAGCommand) Switches() []*dcmd.ArgDef {
 }
 
 func (yc *YAGCommand) Run(data *dcmd.Data) (interface{}, error) {
+	if !yc.RunInDM && data.Source == dcmd.DMSource {
+		return nil, nil
+	}
 
 	// Track how long execution of a command took
 	started := time.Now()
