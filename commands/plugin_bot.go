@@ -18,6 +18,7 @@ func (p *Plugin) InitBot() {
 	CommandSystem = dcmd.NewStandardSystem("")
 	CommandSystem.Prefix = p
 	CommandSystem.State = bot.State
+	CommandSystem.Root.RunInDM = true
 
 	CommandSystem.Root.AddCommand(cmdHelp, cmdHelp.GetTrigger())
 

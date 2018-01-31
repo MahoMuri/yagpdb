@@ -443,7 +443,8 @@ func (yc *YAGCommand) Logger(data *dcmd.Data) *log.Entry {
 }
 
 func (yc *YAGCommand) GetTrigger() *dcmd.Trigger {
-	return dcmd.NewTrigger(yc.Name, yc.Aliases...)
+	trigger := dcmd.NewTrigger(yc.Name, yc.Aliases...).SetDisableInDM(!yc.RunInDM)
+	return trigger
 }
 
 // Keys and other sensitive information shouldnt be sent in error messages, but just in case it is
