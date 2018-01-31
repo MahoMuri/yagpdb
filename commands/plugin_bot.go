@@ -5,11 +5,9 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/jonas747/dcmd"
 	"github.com/jonas747/discordgo"
-	"github.com/jonas747/dutil"
 	"github.com/jonas747/yagpdb/bot"
 	"github.com/jonas747/yagpdb/bot/eventsystem"
 	"github.com/jonas747/yagpdb/common"
-	"github.com/mediocregopher/radix.v2/redis"
 )
 
 var (
@@ -132,6 +130,10 @@ var cmdHelp = &YAGCommand{
 	Cooldown: 10,
 }
 
+func CmdNotFound(search string) string {
+	return fmt.Sprintf("Couldn't find command %q", search)
+}
+
 func cmdFuncHelp(data *dcmd.Data) (interface{}, error) {
 	target := ""
 	if data.Args[0] != nil {
@@ -140,9 +142,27 @@ func cmdFuncHelp(data *dcmd.Data) (interface{}, error) {
 
 	var resp []*discordgo.MessageEmbed
 	if target != "" {
+		// Send the targetted help in the channel it was requested in
+		resp = dcmd.GenerateTargettedHelp(target, data, data.ContainerChain[0], &dcmd.StdHelpFormatter{})
+		if len(resp) < 1 {
+			return CmdNotFound(target), nil
+		}
 
+		return resp, nil
+	} else {
+		// Send full help in DM
+		channel, err := bot.GetCreatePrivateChannel(data.Msg.Author.ID)
+		if err != nil {
+			return "Something went wrong", err
+		}
+
+		resp = dcmd.GenerateHelp(data, data.ContainerChain[0], &dcmd.StdHelpFormatter{})
+		for _, v := range resp {
+			common.BotSession.ChannelMessageSendEmbed(channel.ID, v)
+		}
 	}
-	dcmd.GenerateHelp(d, container, formatter)
+
+	return nil, nil
 
 	// Fetch the prefix if ther command was not run in a dm
 	// footer := ""
@@ -162,27 +182,27 @@ func cmdFuncHelp(data *dcmd.Data) (interface{}, error) {
 	// 	footer += "**Support server:** https://discord.gg/0vYlUK2XBKldPSMY\n**Control Panel:** https://yagpdb.xyz/manage\n"
 	// }
 
-	channelId := data.Msg.ChannelID
+	// channelId := data.Msg.ChannelID
 
-	help := GenerateHelp(target)
-	if target == "" && data.Source != commandsystem.SourceDM {
-		privateChannel, err := bot.GetCreatePrivateChannel(data.Message.Author.ID)
-		if err != nil {
-			return "", err
-		}
-		channelId = privateChannel.ID
-	}
+	// help := GenerateHelp(target)
+	// if target == "" && data.Source != commandsystem.SourceDM {
+	// 	privateChannel, err := bot.GetCreatePrivateChannel(data.Message.Author.ID)
+	// 	if err != nil {
+	// 		return "", err
+	// 	}
+	// 	channelId = privateChannel.ID
+	// }
 
-	if help == "" {
-		help = "Command not found"
-	}
+	// if help == "" {
+	// 	help = "Command not found"
+	// }
 
-	dutil.SplitSendMessagePS(common.BotSession, channelId, help+"\n"+footer, "```ini\n", "```", false, false)
-	if data.Source != commandsystem.SourceDM && target == "" {
-		return "You've Got Mail!", nil
-	} else {
-		return "", nil
-	}
+	// dutil.SplitSendMessagePS(common.BotSession, channelId, help+"\n"+footer, "```ini\n", "```", false, false)
+	// if data.Source != commandsystem.SourceDM && target == "" {
+	// 	return "You've Got Mail!", nil
+	// } else {
+	// 	return "", nil
+	// }
 }
 
 func HandleGuildCreate(evt *eventsystem.EventData) {

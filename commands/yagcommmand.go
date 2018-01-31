@@ -94,7 +94,7 @@ type YAGCommand struct {
 
 // CmdWithCategory puts the command in a category, mostly used for the help generation
 func (yc *YAGCommand) Category() *dcmd.Category {
-	return yc.CommandCategory
+	return yc.CmdCategory
 }
 
 func (yc *YAGCommand) Descriptions(data *dcmd.Data) (short, long string) {
@@ -114,38 +114,40 @@ func (yc *YAGCommand) Run(data *dcmd.Data) (interface{}, error) {
 		return nil, nil
 	}
 
+	logger := yc.Logger(data)
+
 	// Track how long execution of a command took
 	started := time.Now()
 	defer func() {
-		yc.logExecutionTime(time.Since(started), raw, trigger.Message.Author.Username)
+		yc.logExecutionTime(time.Since(started), data.Msg.Content, data.Msg.Author.Username)
 	}()
 
 	// Need a redis client to check cooldowns and retrieve command settings
 	client, err := common.RedisPool.Get()
 	if err != nil {
-		log.WithError(err).Error("Failed retrieving redis client")
+		logger.WithError(err).Error("Failed retrieving redis client")
 		return nil, errors.New("Failed retrieving redis client")
 	}
 	defer common.RedisPool.Put(client)
 
-	err = common.BlockingLockRedisKey(client, RKeyCommandLock(trigger.Message.Author.ID, yc.Name), CommandExecTimeout*2, int((CommandExecTimeout + time.Second).Seconds()))
+	err = common.BlockingLockRedisKey(client, RKeyCommandLock(data.Msg.Author.ID, yc.Name), CommandExecTimeout*2, int((CommandExecTimeout + time.Second).Seconds()))
 	if err != nil {
 		return nil, errors.WithMessage(err, "Failed locking command")
 	}
-	defer common.UnlockRedisKey(client, RKeyCommandLock(trigger.Message.Author.ID, yc.Name))
+	defer common.UnlockRedisKey(client, RKeyCommandLock(data.Msg.Author.ID, yc.Name))
 
-	cState := bot.State.Channel(true, trigger.Message.ChannelID)
+	cState := bot.State.Channel(true, data.Msg.ChannelID)
 	if cState == nil {
 		return nil, errors.New("Channel not found")
 	}
 
 	// Set up log entry for later use
 	logEntry := &common.LoggedExecutedCommand{
-		UserID:    trigger.Message.Author.ID,
+		UserID:    data.Msg.Author.ID,
 		ChannelID: cState.ID(),
 
 		Command:    yc.Name,
-		RawCommand: raw,
+		RawCommand: data.Msg.Content,
 		TimeStamp:  time.Now(),
 	}
 
@@ -153,7 +155,7 @@ func (yc *YAGCommand) Run(data *dcmd.Data) (interface{}, error) {
 		logEntry.GuildID = cState.Guild.ID()
 	}
 
-	resp, autoDel := yc.checkCanExecuteCommand(trigger, client, cState)
+	resp, autoDel := yc.checkCanExecuteCommand(data, client, cState)
 	if resp != "" {
 		m, err := common.BotSession.ChannelMessageSend(cState.ID(), resp)
 		if m != nil {
@@ -162,54 +164,71 @@ func (yc *YAGCommand) Run(data *dcmd.Data) (interface{}, error) {
 		return nil, err
 	}
 
-	log.WithField("channel", cState.ID()).WithField("author", trigger.Message.Author.ID).Info("Handling command: " + raw)
+	logger.Info("Handling command: " + data.Msg.Content)
 
-	runCtx, cancelExec := context.WithTimeout(ctx, CommandExecTimeout)
+	runCtx, cancelExec := context.WithTimeout(data.Context(), CommandExecTimeout)
 	defer cancelExec()
 
 	// Run the command
-	replies, err := yc.Command.HandleCommand(raw, trigger, context.WithValue(runCtx, CtxKeyRedisClient, client))
-
+	r, err := yc.RunFunc(data.WithContext(context.WithValue(runCtx, CtxKeyRedisClient, client)))
 	if err != nil {
 		if errors.Cause(err) == context.Canceled || errors.Cause(err) == context.DeadlineExceeded {
-			common.BotSession.ChannelMessageSend(cState.Channel.ID, "Took longer than "+CommandExecTimeout.String()+" to handle command: `"+common.EscapeSpecialMentions(raw)+"`, Cancelled the command.")
-		} else {
-			logEntry.Error = err.Error()
-			log.WithError(err).WithField("channel", cState.ID()).Error(yc.Name, ": failed handling command")
+			r = "Took longer than " + CommandExecTimeout.String() + " to handle command: `" + common.EscapeSpecialMentions(data.Msg.Content) + "`, Cancelled the command."
+			err = nil
 		}
+	}
+
+	// Send the reponse
+	replies, err := yc.SendResponse(data, r, err)
+	if err != nil {
+		logger.WithError(err).Error("Failed sending response")
 	}
 
 	logEntry.ResponseTime = int64(time.Since(started))
 
 	if len(replies) > 0 && autoDel {
-		go yc.deleteResponse(append(replies, trigger.Message))
+		go yc.deleteResponse(append(replies, data.Msg))
 	} else if autoDel {
-		go yc.deleteResponse([]*discordgo.Message{trigger.Message})
+		go yc.deleteResponse([]*discordgo.Message{data.Msg})
 	}
 
 	// Log errors
 	if err == nil {
-		err = yc.SetCooldown(client, trigger.Message.Author.ID)
+		err = yc.SetCooldown(client, data.Msg.Author.ID)
 		if err != nil {
-			log.WithError(err).Error("Failed setting cooldown")
+			logger.WithError(err).Error("Failed setting cooldown")
 		}
 	}
 
 	// Create command log entry
 	err = common.GORM.Create(logEntry).Error
 	if err != nil {
-		log.WithError(err).Error("Failed creating command execution log")
+		logger.WithError(err).Error("Failed creating command execution log")
 	}
 
 	return replies, err
 }
 
+func (yc *YAGCommand) SendResponse(cmdData *dcmd.Data, resp interface{}, err error) (replies []*discordgo.Message, errR error) {
+	if err != nil {
+		yc.Logger(cmdData).WithError(err).Error("Command returned error")
+	}
+
+	if resp == nil && err != nil {
+		replies, errR = dcmd.SendResponseInterface(cmdData, fmt.Sprintf("%q command returned an error: %s", cmdData.Cmd.FormatNames(false, "/"), err), true)
+	} else if resp != nil {
+		replies, errR = dcmd.SendResponseInterface(cmdData, resp, false)
+	}
+
+	return
+}
+
 // checkCanExecuteCommand returns a non empty string if this user cannot execute this command
-func (cs *YAGCommand) checkCanExecuteCommand(trigger *commandsystem.TriggerData, client *redis.Client, cState *dstate.ChannelState) (resp string, autoDel bool) {
+func (cs *YAGCommand) checkCanExecuteCommand(data *dcmd.Data, client *redis.Client, cState *dstate.ChannelState) (resp string, autoDel bool) {
 	// Check guild specific settings if not triggered from a DM
 	var guild *dstate.GuildState
 
-	if trigger.Source != commandsystem.SourceDM {
+	if data.Source != dcmd.DMSource {
 
 		guild = cState.Guild
 		if guild == nil {
@@ -230,9 +249,9 @@ func (cs *YAGCommand) checkCanExecuteCommand(trigger *commandsystem.TriggerData,
 		}
 
 		if role != "" {
-			member, err := bot.GetMember(guild.ID(), trigger.Message.Author.ID)
+			member, err := bot.GetMember(guild.ID(), data.Msg.Author.ID)
 			if err != nil {
-				log.WithError(err).WithField("user", trigger.Message.Author.ID).WithField("guild", guild.ID()).Error("Failed fetchign guild member")
+				log.WithError(err).WithField("user", data.Msg.Author.ID).WithField("guild", guild.ID()).Error("Failed fetchign guild member")
 				return "Bot is having issues retrieving your member state", false
 			}
 
@@ -257,14 +276,14 @@ func (cs *YAGCommand) checkCanExecuteCommand(trigger *commandsystem.TriggerData,
 	}
 
 	// Check the command cooldown
-	cdLeft, err := cs.CooldownLeft(client, trigger.Message.Author.ID)
+	cdLeft, err := cs.CooldownLeft(client, data.Msg.Author.ID)
 	if err != nil {
 		// Just pretend the cooldown is off...
-		log.WithError(err).WithField("author", trigger.Message.Author.ID).Error("Failed checking command cooldown")
+		log.WithError(err).WithField("author", data.Msg.Author.ID).Error("Failed checking command cooldown")
 	}
 
 	if cdLeft > 0 {
-		return fmt.Sprintf("**%q:** You need to wait %d seconds before you can use the %q command again", common.EscapeSpecialMentions(trigger.Message.Author.Username), cdLeft, cs.Name), false
+		return fmt.Sprintf("**%q:** You need to wait %d seconds before you can use the %q command again", common.EscapeSpecialMentions(data.Msg.Author.Username), cdLeft, cs.Name), false
 	}
 
 	return
@@ -405,6 +424,22 @@ func (cs *YAGCommand) SetCooldown(client *redis.Client, userID string) error {
 	now := time.Now().Unix()
 	err := client.Cmd("SET", RKeyCommandCooldown(userID, cs.Name), now, "EX", cs.Cooldown).Err
 	return err
+}
+
+func (yc *YAGCommand) Logger(data *dcmd.Data) *log.Entry {
+	l := log.WithField("cmd", yc.Name)
+	if data != nil {
+		if data.Msg != nil {
+			l = l.WithField("user_n", data.Msg.Author.Username)
+			l = l.WithField("user_id", data.Msg.Author.ID)
+		}
+
+		if data.CS != nil {
+			l = l.WithField("channel", data.CS.ID())
+		}
+	}
+
+	return l
 }
 
 // Keys and other sensitive information shouldnt be sent in error messages, but just in case it is
