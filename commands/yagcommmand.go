@@ -442,6 +442,10 @@ func (yc *YAGCommand) Logger(data *dcmd.Data) *log.Entry {
 	return l
 }
 
+func (yc *YAGCommand) GetTrigger() *dcmd.Trigger {
+	return dcmd.NewTrigger(yc.Name, yc.Aliases...)
+}
+
 // Keys and other sensitive information shouldnt be sent in error messages, but just in case it is
 func CensorError(err error) string {
 	toCensor := []string{
