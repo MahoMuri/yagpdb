@@ -15,7 +15,7 @@ var cmdInvite = &commands.CustomCommand{
 		RunInDm:     true,
 
 		Run: func(data *commandsystem.ExecData) (interface{}, error) {
-			return "Please add the bot through the website\nhttps://" + common.Conf.Host, nil
+			return "Please add the bot through the websie\nhttps://" + common.Conf.Host, nil
 		},
 	},
 }
