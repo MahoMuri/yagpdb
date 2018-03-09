@@ -160,7 +160,7 @@
                         Ban command enabled<br/>
                         <code>(mention or prefix) ban @user some reason</code><br/>
                         Only users with ban permission can use this.<br/>
-                        The ban commnad will ban a user as well as sending a message that the user was banned in the action channel.
+                        The ban command will ban a user as well as sending a message that the user was banned in the action channel.
                       </label>
                     </div>
                     <div class="checkbox">
@@ -173,7 +173,7 @@
                         <label>Ban DM (Leave empty for default)</label>
                         <textarea class="form-control" rows="5" name="BanMessage">{{.ModConfig.BanMessage}}</textarea>
                         <p class="help-block">Available template data is<br/>
-                        {{template "template_helper_user"}} - The usser being banned/kicked<br/>
+                        {{template "template_helper_user"}} - The user being banned/kicked<br/>
                         <code>{{"{{"}}.Reason{{"}}"}}</code> - The reason specified in the ban/kick<br/>
                         {{template "template_helper_mod_author"}}</p>
                     </div>
